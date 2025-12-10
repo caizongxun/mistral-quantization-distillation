@@ -2,10 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 Complete Training Pipeline
-一次性生成所有模型版本：
-1. Phi-2 量化版本 (INT4)
-2. Phi-2 + LoRA 版本
-3. Phi-2 + LoRA 量化版本 (INT4)
+Generate all model versions: Quantized, LoRA, LoRA+Quantized
 
 Usage (Colab):
     !git clone https://github.com/caizongxun/mistral-quantization-distillation.git
@@ -34,33 +31,33 @@ import json
 import time
 
 class Timer:
-    """簡單的計時器"""
+    """Simple timer context manager"""
     def __init__(self, name="Operation"):
         self.name = name
         self.start_time = None
     
     def __enter__(self):
         self.start_time = time.time()
-        print(f"\n⏱️  {self.name} 開始...")
+        print(f"\nTimer: {self.name} starting...")
         return self
     
     def __exit__(self, *args):
         elapsed = time.time() - self.start_time
         hours, remainder = divmod(elapsed, 3600)
         minutes, seconds = divmod(remainder, 60)
-        print(f"✅ {self.name} 完成！用時: {int(hours)}h {int(minutes)}m {int(seconds)}s")
+        print(f"OK: {self.name} completed! Time: {int(hours)}h {int(minutes)}m {int(seconds)}s")
         self.elapsed = elapsed
 
 class CompleteTrainingPipeline:
     """
-    完整訓練管道
+    Complete training pipeline
     """
     
     def __init__(self, output_base: str = "models"):
         self.output_base = Path(output_base)
         self.output_base.mkdir(parents=True, exist_ok=True)
         
-        # 定義所有輸出路徑
+        # Define all output paths
         self.paths = {
             'phi_base': self.output_base / "phi-2-base",
             'phi_quant': self.output_base / "phi-2-quantized",
@@ -68,7 +65,7 @@ class CompleteTrainingPipeline:
             'phi_lora_quant': self.output_base / "phi-2-lora-quantized",
         }
         
-        # 創建所有目錄
+        # Create all directories
         for path in self.paths.values():
             path.mkdir(parents=True, exist_ok=True)
         
@@ -76,7 +73,7 @@ class CompleteTrainingPipeline:
         self.supports_tf32 = False
         
         if torch.cuda.is_available():
-            print(f"\n🎮 GPU: {torch.cuda.get_device_name(0)}")
+            print(f"\nGPU: {torch.cuda.get_device_name(0)}")
             print(f"   Memory: {torch.cuda.get_device_properties(0).total_memory / 1e9:.2f}GB")
             print(f"   CUDA: {torch.version.cuda}")
             
@@ -84,15 +81,15 @@ class CompleteTrainingPipeline:
                 gpu_capability = torch.cuda.get_device_capability(0)
                 self.supports_tf32 = gpu_capability[0] >= 8
                 if not self.supports_tf32:
-                    print(f"   ⚠️  不支持 TF32（需要 Ampere 或更新的架構，當前: CC {gpu_capability[0]}.{gpu_capability[1]}）")
+                    print(f"   WARNING: TF32 not supported (need Ampere+, current: CC {gpu_capability[0]}.{gpu_capability[1]})")
             except:
                 pass
         else:
-            print(f"\n⚠️  使用 CPU (建議用 Colab GPU)")
+            print(f"\nWARNING: Using CPU (recommended to use Colab GPU)")
     
     def prepare_dataset(self, tokenizer, num_samples: int = 100):
-        """準備訓練數據集"""
-        print(f"\n📚 準備數據集 ({num_samples} 樣本)...")
+        """Prepare training dataset"""
+        print(f"\nDataset: Preparing dataset ({num_samples} samples)...")
         
         dataset = load_dataset("databricks/databricks-dolly-15k")
         
@@ -138,17 +135,17 @@ class CompleteTrainingPipeline:
             num_proc=2
         )
         
-        print(f"✅ 數據集準備完成: {len(tokenized_dataset)} 樣本")
+        print(f"OK: Dataset ready: {len(tokenized_dataset)} samples")
         return tokenized_dataset
     
     def stage1_save_base_model(self):
-        """第1階段: 保存基礎模型 (不訓練，只下載)"""
+        """Stage 1: Save base model (download only)"""
         print("\n" + "="*70)
-        print("🔹 第 1 階段: 保存基礎 Phi-2 模型")
+        print("STAGE 1: Save base Phi-2 model")
         print("="*70)
         
-        with Timer("保存基礎模型") as timer:
-            print("\n📥 下載 Phi-2 模型...")
+        with Timer("Save base model") as timer:
+            print("\nDOWN: Download Phi-2 model...")
             tokenizer = AutoTokenizer.from_pretrained(
                 "microsoft/phi-2",
                 trust_remote_code=True
@@ -159,7 +156,7 @@ class CompleteTrainingPipeline:
                 trust_remote_code=True
             )
             
-            print(f"💾 保存到 {self.paths['phi_base']}")
+            print(f"SAVE: Save to {self.paths['phi_base']}")
             model.save_pretrained(str(self.paths['phi_base']))
             tokenizer.save_pretrained(str(self.paths['phi_base']))
             
@@ -171,16 +168,16 @@ class CompleteTrainingPipeline:
                 'status': 'saved'
             }
             self._save_metadata(self.paths['phi_base'], metadata)
-            print(f"✅ 基礎模型已保存")
+            print(f"OK: Base model saved")
     
     def stage2_quantize_base_model(self):
-        """第2階段: 量化基礎模型"""
+        """Stage 2: Quantize base model"""
         print("\n" + "="*70)
-        print("🔹 第 2 階段: 量化基礎模型 (INT4)")
+        print("STAGE 2: Quantize base model (INT4)")
         print("="*70)
         
-        with Timer("量化基礎模型") as timer:
-            print("\n🔧 載入基礎模型...")
+        with Timer("Quantize base model") as timer:
+            print("\nLOAD: Load base model...")
             tokenizer = AutoTokenizer.from_pretrained(str(self.paths['phi_base']))
             
             quant_config = BitsAndBytesConfig(
@@ -197,7 +194,7 @@ class CompleteTrainingPipeline:
                 trust_remote_code=True
             )
             
-            print(f"💾 保存量化模型到 {self.paths['phi_quant']}")
+            print(f"SAVE: Save quantized model to {self.paths['phi_quant']}")
             model.save_pretrained(str(self.paths['phi_quant']))
             tokenizer.save_pretrained(str(self.paths['phi_quant']))
             
@@ -209,16 +206,16 @@ class CompleteTrainingPipeline:
                 'status': 'saved'
             }
             self._save_metadata(self.paths['phi_quant'], metadata)
-            print(f"✅ 量化模型已保存")
+            print(f"OK: Quantized model saved")
     
     def stage3_lora_finetuning(self, num_samples: int = 100, num_epochs: int = 1):
-        """第3階段: LoRA 微調"""
+        """Stage 3: LoRA fine-tuning"""
         print("\n" + "="*70)
-        print(f"🔹 第 3 階段: LoRA 微調 ({num_samples} 樣本, {num_epochs} epoch)")
+        print(f"STAGE 3: LoRA fine-tuning ({num_samples} samples, {num_epochs} epoch)")
         print("="*70)
         
-        with Timer("LoRA 微調") as timer:
-            print("\n📥 載入基礎模型...")
+        with Timer("LoRA fine-tuning") as timer:
+            print("\nLOAD: Load base model...")
             tokenizer = AutoTokenizer.from_pretrained(str(self.paths['phi_base']))
             model = AutoModelForCausalLM.from_pretrained(
                 str(self.paths['phi_base']),
@@ -227,7 +224,7 @@ class CompleteTrainingPipeline:
                 trust_remote_code=True
             )
             
-            print("\n🔗 應用 LoRA...")
+            print("\nLORA: Apply LoRA...")
             lora_config = LoraConfig(
                 r=8,
                 lora_alpha=16,
@@ -239,10 +236,10 @@ class CompleteTrainingPipeline:
             model = get_peft_model(model, lora_config)
             model.print_trainable_parameters()
             
-            print("\n📚 準備數據集...")
+            print("\nDATA: Prepare dataset...")
             train_dataset = self.prepare_dataset(tokenizer, num_samples)
             
-            print("\n🎓 開始訓練...")
+            print("\nTRAIN: Start training...")
             
             device_props = torch.cuda.get_device_properties(0) if torch.cuda.is_available() else None
             total_memory = device_props.total_memory if device_props else 16e9
@@ -281,11 +278,11 @@ class CompleteTrainingPipeline:
             
             trainer.train()
             
-            # 合併 LoRA 權重到基礎模型
-            print(f"\n🔄 合併 LoRA 權重到基礎模型...")
+            # Merge LoRA weights with base model
+            print(f"\nMERGE: Merge LoRA weights with base model...")
             model = model.merge_and_unload()
             
-            print(f"\n💾 保存完整 LoRA 模型...")
+            print(f"\nSAVE: Save complete LoRA model...")
             model.save_pretrained(str(self.paths['phi_lora']))
             tokenizer.save_pretrained(str(self.paths['phi_lora']))
             
@@ -299,16 +296,16 @@ class CompleteTrainingPipeline:
                 'note': 'LoRA weights merged into base model'
             }
             self._save_metadata(self.paths['phi_lora'], metadata)
-            print(f"✅ LoRA 微調模型已保存")
+            print(f"OK: LoRA fine-tuned model saved")
     
     def stage4_quantize_lora_model(self):
-        """第4階段: 量化 LoRA 微調模型"""
+        """Stage 4: Quantize LoRA fine-tuned model"""
         print("\n" + "="*70)
-        print("🔹 第 4 階段: 量化 LoRA 微調模型 (INT4)")
+        print("STAGE 4: Quantize LoRA fine-tuned model (INT4)")
         print("="*70)
         
-        with Timer("量化 LoRA 模型") as timer:
-            print("\n📥 載入 LoRA 微調模型...")
+        with Timer("Quantize LoRA model") as timer:
+            print("\nLOAD: Load LoRA fine-tuned model...")
             tokenizer = AutoTokenizer.from_pretrained(str(self.paths['phi_lora']))
             
             quant_config = BitsAndBytesConfig(
@@ -325,7 +322,7 @@ class CompleteTrainingPipeline:
                 trust_remote_code=True
             )
             
-            print(f"💾 保存量化 LoRA 模型到 {self.paths['phi_lora_quant']}")
+            print(f"SAVE: Save quantized LoRA model to {self.paths['phi_lora_quant']}")
             model.save_pretrained(str(self.paths['phi_lora_quant']))
             tokenizer.save_pretrained(str(self.paths['phi_lora_quant']))
             
@@ -338,76 +335,76 @@ class CompleteTrainingPipeline:
                 'status': 'saved'
             }
             self._save_metadata(self.paths['phi_lora_quant'], metadata)
-            print(f"✅ 量化 LoRA 模型已保存")
+            print(f"OK: Quantized LoRA model saved")
     
     def _save_metadata(self, model_path: Path, metadata: dict):
-        """保存模型元數據"""
+        """Save model metadata"""
         with open(model_path / 'metadata.json', 'w', encoding='utf-8') as f:
             json.dump(metadata, f, indent=2, ensure_ascii=False)
     
     def run_full_pipeline(self, num_samples: int = 100, num_epochs: int = 1):
-        """執行完整訓練管道"""
+        """Run complete training pipeline"""
         print("\n" + "#"*70)
         print("#" + " "*68 + "#")
-        print("#" + "  完整訓練管道: 量化 + LoRA + LoRA量化".center(68) + "#")
+        print("#" + "  Complete Training Pipeline: Quantized + LoRA + LoRA Quantized".center(68) + "#")
         print("#" + " "*68 + "#")
         print("#"*70)
         
         pipeline_start = time.time()
         
         try:
-            # 第1階段
+            # Stage 1
             self.stage1_save_base_model()
             
-            # 第2階段
+            # Stage 2
             self.stage2_quantize_base_model()
             
-            # 第3階段
+            # Stage 3
             self.stage3_lora_finetuning(num_samples, num_epochs)
             
-            # 第4階段
+            # Stage 4
             self.stage4_quantize_lora_model()
             
-            # 完成
+            # Complete
             pipeline_elapsed = time.time() - pipeline_start
             hours, remainder = divmod(pipeline_elapsed, 3600)
             minutes, seconds = divmod(remainder, 60)
             
             print("\n" + "="*70)
-            print("✅ 完整管道執行完成！")
+            print("OK: Complete pipeline execution finished!")
             print("="*70)
-            print(f"\n📊 訓練結果:")
-            print(f"\n1️⃣  Phi-2 基礎模型 (float16)")
-            print(f"   📁 {self.paths['phi_base']}")
+            print(f"\nRESULTS: Training results:")
+            print(f"\n1. Phi-2 base model (float16)")
+            print(f"   PATH: {self.paths['phi_base']}")
             print(f"   Size: ~5GB, Speed: 1x")
             
-            print(f"\n2️⃣  Phi-2 量化版本 (INT4)")
-            print(f"   📁 {self.paths['phi_quant']}")
-            print(f"   Size: ~1.2GB ⬇️, Speed: 3x ⚡")
+            print(f"\n2. Phi-2 quantized version (INT4)")
+            print(f"   PATH: {self.paths['phi_quant']}")
+            print(f"   Size: ~1.2GB DOWN, Speed: 3x FAST")
             
-            print(f"\n3️⃣  Phi-2 + LoRA 版本")
-            print(f"   📁 {self.paths['phi_lora']}")
-            print(f"   Size: ~5GB, Accuracy: +7% ⬆️")
+            print(f"\n3. Phi-2 + LoRA version")
+            print(f"   PATH: {self.paths['phi_lora']}")
+            print(f"   Size: ~5GB, Accuracy: +7% UP")
             
-            print(f"\n4️⃣  Phi-2 + LoRA 量化版本 (INT4)")
-            print(f"   📁 {self.paths['phi_lora_quant']}")
-            print(f"   Size: ~1.2GB ⬇️, Speed: 3x ⚡, Accuracy: +7% ⬆️")
+            print(f"\n4. Phi-2 + LoRA quantized version (INT4)")
+            print(f"   PATH: {self.paths['phi_lora_quant']}")
+            print(f"   Size: ~1.2GB DOWN, Speed: 3x FAST, Accuracy: +7% UP")
             
-            print(f"\n⏱️  總耗時: {int(hours)}h {int(minutes)}m {int(seconds)}s")
-            print("\n🚀 所有模型已準備好！")
+            print(f"\nTIME: Total time: {int(hours)}h {int(minutes)}m {int(seconds)}s")
+            print("\nALL: All models ready!")
             
         except Exception as e:
-            print(f"\n❌ 錯誤: {e}")
+            print(f"\nERROR: {e}")
             import traceback
             traceback.print_exc()
 
 def main():
     import argparse
     
-    parser = argparse.ArgumentParser(description='完整訓練管道')
-    parser.add_argument('--samples', type=int, default=100, help='訓練樣本數')
-    parser.add_argument('--epochs', type=int, default=1, help='訓練 epoch 數')
-    parser.add_argument('--output', default='models', help='輸出目錄')
+    parser = argparse.ArgumentParser(description='Complete training pipeline')
+    parser.add_argument('--samples', type=int, default=100, help='Number of training samples')
+    parser.add_argument('--epochs', type=int, default=1, help='Number of training epochs')
+    parser.add_argument('--output', default='models', help='Output directory')
     
     args = parser.parse_args()
     
