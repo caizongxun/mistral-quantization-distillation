@@ -80,6 +80,10 @@ class CoLabOptimizedDistillation:
         
         print(f"✅ Dataset prepared: {len(dataset)} samples")
         
+        # 設定 pad_token（重要！）
+        if tokenizer.pad_token is None:
+            tokenizer.pad_token = tokenizer.eos_token
+        
         def tokenize_function(examples):
             texts = examples["text"]
             if isinstance(texts, str):
@@ -199,7 +203,7 @@ class CoLabOptimizedDistillation:
         只載入學生，記憶體充足
         """
         print("\n" + "="*70)
-        print("👩‍🌈 STEP 2: Train Student Model")
+        print("👩‍🎓 STEP 2: Train Student Model")
         print("="*70)
         
         # 載入學生模型
@@ -315,6 +319,8 @@ class CoLabOptimizedDistillation:
                 self.student_model_id,
                 trust_remote_code=True
             )
+            student_tokenizer.pad_token = student_tokenizer.eos_token
+            
             tokenized_dataset = self.prepare_dataset(
                 dataset_name=dataset_name,
                 num_samples=num_samples,
