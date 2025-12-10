@@ -1,0 +1,23 @@
+{
+  "max_length": 512,
+  "max_new_tokens": 100,
+  "temperature": 0.7,
+  "top_p": 0.9,
+  "top_k": 50,
+  "do_sample": true,
+  "num_beams": 1,
+  "repetition_penalty": 1.2,
+  "length_penalty": 1.0,
+  "early_stopping": false,
+  "no_repeat_ngram_size": 0,
+  "description": "Inference configuration for all models",
+  "parameters": {
+    "max_length": "Maximum sequence length for input",
+    "max_new_tokens": "Maximum number of tokens to generate",
+    "temperature": "Softness of probability distribution (higher=more creative)",
+    "top_p": "Nucleus sampling threshold",
+    "top_k": "Top-k sampling parameter",
+    "do_sample": "Use sampling instead of greedy decoding",
+    "repetition_penalty": "Penalty for repeating tokens"
+  }
+}

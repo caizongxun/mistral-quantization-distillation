@@ -1,0 +1,25 @@
+{
+  "num_epochs": 3,
+  "batch_size": 4,
+  "gradient_accumulation_steps": 2,
+  "learning_rate": 0.00005,
+  "warmup_ratio": 0.1,
+  "weight_decay": 0.01,
+  "max_grad_norm": 1.0,
+  "save_strategy": "steps",
+  "save_steps": 100,
+  "logging_steps": 10,
+  "fp16": true,
+  "optim": "paged_adamw_8bit",
+  "distillation_temperature": 3.0,
+  "kl_divergence_weight": 0.5,
+  "description": "Knowledge distillation training configuration for Phi-2 student model",
+  "lora_config": {
+    "r": 16,
+    "lora_alpha": 32,
+    "target_modules": ["q_proj", "v_proj"],
+    "lora_dropout": 0.05,
+    "bias": "none",
+    "task_type": "CAUSAL_LM"
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "load_in_4bit": true,
+  "bnb_4bit_use_double_quant": true,
+  "bnb_4bit_quant_type": "nf4",
+  "bnb_4bit_compute_dtype": "float16",
+  "device_map": "auto",
+  "description": "BitsAndBytes 4-bit quantization configuration for Mistral-7B",
+  "parameters": {
+    "load_in_4bit": "Enable 4-bit quantization loading",
+    "bnb_4bit_use_double_quant": "Apply double (nested) quantization for additional memory savings",
+    "bnb_4bit_quant_type": "Use NF4 (Normal Float 4) quantization type",
+    "bnb_4bit_compute_dtype": "Use float16 for computation to maintain precision during inference",
+    "device_map": "Automatically distribute model across available devices"
+  },
+  "expected_memory_reduction": "75% (16GB -> 4GB)",
+  "expected_speed_improvement": "2-3x faster inference"
+}
