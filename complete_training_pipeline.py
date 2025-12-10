@@ -11,10 +11,10 @@ Usage (Colab):
     !git clone https://github.com/caizongxun/mistral-quantization-distillation.git
     %cd mistral-quantization-distillation
     !pip install -q transformers datasets peft bitsandbytes accelerate
-    !python complete_training_pipeline.py
+    !python complete_training_pipeline.py --samples 200 --epochs 1
 
 Usage (Local):
-    python complete_training_pipeline.py
+    python complete_training_pipeline.py --samples 100 --epochs 1
 """
 
 import torch
@@ -73,11 +73,21 @@ class CompleteTrainingPipeline:
             path.mkdir(parents=True, exist_ok=True)
         
         self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        self.supports_tf32 = False  # 默認不支持
         
         if torch.cuda.is_available():
             print(f"\n🎮 GPU: {torch.cuda.get_device_name(0)}")
             print(f"   Memory: {torch.cuda.get_device_properties(0).total_memory / 1e9:.2f}GB")
             print(f"   CUDA: {torch.version.cuda}")
+            
+            # 檢查 GPU 是否支持 tf32（Ampere 架構及更新，即 compute capability >= 8.0）
+            try:
+                gpu_capability = torch.cuda.get_device_capability(0)
+                self.supports_tf32 = gpu_capability[0] >= 8
+                if not self.supports_tf32:
+                    print(f"   ⚠️  不支持 TF32（需要 Ampere 或更新的架構，當前: CC {gpu_capability[0]}.{gpu_capability[1]}）")
+            except:
+                pass
         else:
             print(f"\n⚠️  使用 CPU (建議用 Colab GPU)")
     
@@ -234,10 +244,16 @@ class CompleteTrainingPipeline:
             train_dataset = self.prepare_dataset(tokenizer, num_samples)
             
             print("\n🎓 開始訓練...")
+            
+            # 自動檢測合適的 batch size
+            device_props = torch.cuda.get_device_properties(0) if torch.cuda.is_available() else None
+            total_memory = device_props.total_memory if device_props else 16e9
+            batch_size = 1 if total_memory < 20e9 else 2
+            
             training_args = TrainingArguments(
                 output_dir=str(self.paths['phi_lora']),
                 num_train_epochs=num_epochs,
-                per_device_train_batch_size=1 if torch.cuda.get_device_properties(0).total_memory < 10e9 else 2,
+                per_device_train_batch_size=batch_size,
                 gradient_accumulation_steps=4,
                 learning_rate=5e-5,
                 warmup_steps=10,
@@ -250,7 +266,7 @@ class CompleteTrainingPipeline:
                 remove_unused_columns=False,
                 dataloader_num_workers=0,
                 max_grad_norm=0.3,
-                tf32=True
+                tf32=self.supports_tf32  # 只在支持時啟用
             )
             
             data_collator = DataCollatorForLanguageModeling(
@@ -277,7 +293,7 @@ class CompleteTrainingPipeline:
                 'lora_rank': 8,
                 'lora_alpha': 16,
                 'params': '2.7B',
-                'trainable_params': '655K (0.02%)',
+                'trainable_params': '2.6M (0.09%)',
                 'epochs': num_epochs,
                 'samples': num_samples,
                 'status': 'saved'
@@ -319,7 +335,7 @@ class CompleteTrainingPipeline:
                 'lora_rank': 8,
                 'quantization': 'INT4 (nf4)',
                 'params': '2.7B',
-                'trainable_params': '655K (0.02%)',
+                'trainable_params': '2.6M (0.09%)',
                 'status': 'saved'
             }
             self._save_metadata(self.paths['phi_lora_quant'], metadata)
