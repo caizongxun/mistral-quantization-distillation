@@ -73,14 +73,13 @@ class CompleteTrainingPipeline:
             path.mkdir(parents=True, exist_ok=True)
         
         self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
-        self.supports_tf32 = False  # 默認不支持
+        self.supports_tf32 = False
         
         if torch.cuda.is_available():
             print(f"\n🎮 GPU: {torch.cuda.get_device_name(0)}")
             print(f"   Memory: {torch.cuda.get_device_properties(0).total_memory / 1e9:.2f}GB")
             print(f"   CUDA: {torch.version.cuda}")
             
-            # 檢查 GPU 是否支持 tf32（Ampere 架構及更新，即 compute capability >= 8.0）
             try:
                 gpu_capability = torch.cuda.get_device_capability(0)
                 self.supports_tf32 = gpu_capability[0] >= 8
@@ -245,7 +244,6 @@ class CompleteTrainingPipeline:
             
             print("\n🎓 開始訓練...")
             
-            # 自動檢測合適的 batch size
             device_props = torch.cuda.get_device_properties(0) if torch.cuda.is_available() else None
             total_memory = device_props.total_memory if device_props else 16e9
             batch_size = 1 if total_memory < 20e9 else 2
@@ -266,7 +264,7 @@ class CompleteTrainingPipeline:
                 remove_unused_columns=False,
                 dataloader_num_workers=0,
                 max_grad_norm=0.3,
-                tf32=self.supports_tf32  # 只在支持時啟用
+                tf32=self.supports_tf32
             )
             
             data_collator = DataCollatorForLanguageModeling(
@@ -283,7 +281,11 @@ class CompleteTrainingPipeline:
             
             trainer.train()
             
-            print(f"\n💾 保存 LoRA 微調模型...")
+            # 合併 LoRA 權重到基礎模型
+            print(f"\n🔄 合併 LoRA 權重到基礎模型...")
+            model = model.merge_and_unload()
+            
+            print(f"\n💾 保存完整 LoRA 模型...")
             model.save_pretrained(str(self.paths['phi_lora']))
             tokenizer.save_pretrained(str(self.paths['phi_lora']))
             
@@ -293,10 +295,8 @@ class CompleteTrainingPipeline:
                 'lora_rank': 8,
                 'lora_alpha': 16,
                 'params': '2.7B',
-                'trainable_params': '2.6M (0.09%)',
-                'epochs': num_epochs,
-                'samples': num_samples,
-                'status': 'saved'
+                'status': 'saved',
+                'note': 'LoRA weights merged into base model'
             }
             self._save_metadata(self.paths['phi_lora'], metadata)
             print(f"✅ LoRA 微調模型已保存")
@@ -335,7 +335,6 @@ class CompleteTrainingPipeline:
                 'lora_rank': 8,
                 'quantization': 'INT4 (nf4)',
                 'params': '2.7B',
-                'trainable_params': '2.6M (0.09%)',
                 'status': 'saved'
             }
             self._save_metadata(self.paths['phi_lora_quant'], metadata)
