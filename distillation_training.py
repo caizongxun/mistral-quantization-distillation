@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-Knowledge Distillation Training - Fixed for transformers 4.40+
+Knowledge Distillation Training - Fixed for Dolly-15k dataset
 Transfer knowledge from Mistral-7B (teacher) to Phi-2 (student)
 """
 
@@ -132,33 +132,45 @@ class DistillationTrainer:
     def prepare_dataset(self,
                        dataset_name: str = "databricks/databricks-dolly-15k",
                        num_samples: int = 500,
-                       max_length: int = 512) -> tuple:
+                       tokenizer = None) -> tuple:
         """
-        Prepare training dataset
+        Prepare training dataset with proper formatting
         
         Args:
             dataset_name: Name of the dataset
             num_samples: Number of samples to use
-            max_length: Maximum sequence length
+            tokenizer: Tokenizer for encoding text
         """
         print(f"\n📚 Loading dataset: {dataset_name}...")
         
         # Load dataset
         dataset = load_dataset(dataset_name)
         
-        # Format for instruction-based dataset
+        # Format Dolly instructions into readable text
         def format_instruction(example):
-            if 'instruction' in example:
-                text = f"### Instruction:\n{example['instruction']}\n"
-                if 'input' in example and example['input']:
-                    text += f"### Input:\n{example['input']}\n"
-                text += f"### Response:\n{example['response']}"
-            else:
-                text = example.get('text', '')
-            return {'text': text}
+            """
+            Format Dolly-15k instruction into text
+            Fixed to return string, not list
+            """
+            try:
+                instruction = example.get('instruction', '')
+                input_text = example.get('input', '')
+                output = example.get('output', '')
+                
+                # Build formatted text
+                text = f"Instruction: {instruction}\n"
+                if input_text:
+                    text += f"Input: {input_text}\n"
+                text += f"Response: {output}"
+                
+                return {'text': text}
+            except Exception as e:
+                logger.error(f"Error formatting example: {e}")
+                return {'text': 'Error processing example'}
         
         # Apply formatting
-        dataset = dataset.map(format_instruction)
+        print("Formatting dataset...")
+        dataset = dataset.map(format_instruction, remove_columns=dataset['train'].column_names)
         
         # Take subset
         dataset = dataset['train'].select(range(min(num_samples, len(dataset['train']))))
@@ -194,23 +206,40 @@ class DistillationTrainer:
             # Prepare dataset
             train_dataset = self.prepare_dataset(
                 dataset_name=dataset_name,
-                num_samples=num_samples
+                num_samples=num_samples,
+                tokenizer=student_tokenizer
             )
             
-            # Tokenize dataset
+            # Tokenize dataset - properly
             def tokenize_function(examples):
-                return student_tokenizer(
-                    examples["text"],
+                """
+                Tokenize examples - must return dict with proper structure
+                """
+                # Ensure text is a list of strings
+                texts = examples["text"]
+                if isinstance(texts, str):
+                    texts = [texts]
+                
+                # Tokenize
+                tokenized = student_tokenizer(
+                    texts,
                     padding="max_length",
                     truncation=True,
-                    max_length=512
+                    max_length=512,
+                    return_tensors=None  # Don't return tensors yet
                 )
+                
+                # Add labels for language modeling
+                tokenized["labels"] = tokenized["input_ids"].copy()
+                
+                return tokenized
             
             print("\n🔄 Tokenizing dataset...")
             tokenized_dataset = train_dataset.map(
                 tokenize_function,
                 batched=True,
-                remove_columns=["text"]
+                remove_columns=["text"],
+                batch_size=32
             )
             print("✅ Dataset tokenized")
             
@@ -230,10 +259,12 @@ class DistillationTrainer:
                 optim="paged_adamw_8bit",
                 report_to="none",
                 ddp_find_unused_parameters=False,
-                remove_unused_columns=False
+                remove_unused_columns=False,
+                dataloader_pin_memory=True,
+                push_to_hub=False
             )
             
-            # Create data collator (Fixed for transformers 4.40+)
+            # Create data collator
             data_collator = DataCollatorForLanguageModeling(
                 tokenizer=student_tokenizer,
                 mlm=False
@@ -265,7 +296,8 @@ class DistillationTrainer:
                 'batch_size': batch_size,
                 'learning_rate': learning_rate,
                 'training_time_seconds': timer.elapsed,
-                'num_samples': num_samples
+                'num_samples': num_samples,
+                'training_status': 'completed'
             }
             
             metadata_path = self.output_dir / 'distillation_metadata.json'
@@ -292,7 +324,7 @@ Examples:
   python distillation_training.py
   
   # Custom parameters
-  python distillation_training.py --epochs 5 --batch-size 2 --samples 1000
+  python distillation_training.py --epochs 3 --batch-size 2 --samples 500
         """
     )
     
