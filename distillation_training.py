@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-Knowledge Distillation Training
+Knowledge Distillation Training - Fixed for transformers 4.40+
 Transfer knowledge from Mistral-7B (teacher) to Phi-2 (student)
 """
 
@@ -14,10 +14,10 @@ from transformers import (
     AutoTokenizer,
     AutoModelForCausalLM,
     BitsAndBytesConfig,
-    TextDataCollatorForLanguageModeling,
     Trainer,
     TrainingArguments
 )
+from transformers.data.data_collator import DataCollatorForLanguageModeling
 from peft import LoraConfig, get_peft_model, TaskType
 from utils import Timer, MemoryMonitor, setup_logging
 import json
@@ -93,7 +93,7 @@ class DistillationTrainer:
         Args:
             use_lora: Whether to apply LoRA for efficient training
         """
-        print("\n👩‍🌈 Loading Student Model (Phi-2)...")
+        print("\n👩‍🎓 Loading Student Model (Phi-2)...")
         
         student_tokenizer = AutoTokenizer.from_pretrained(
             self.student_model_id,
@@ -158,7 +158,7 @@ class DistillationTrainer:
             return {'text': text}
         
         # Apply formatting
-        dataset = dataset.map(format_instruction, remove_columns=[col for col in dataset['train'].column_names if col != 'text'])
+        dataset = dataset.map(format_instruction)
         
         # Take subset
         dataset = dataset['train'].select(range(min(num_samples, len(dataset['train']))))
@@ -167,28 +167,6 @@ class DistillationTrainer:
         logger.info(f"Dataset prepared with {len(dataset)} samples")
         
         return dataset
-    
-    def create_distillation_loss(self, teacher_logits, student_logits, temperature=3.0):
-        """
-        Create KL divergence distillation loss
-        
-        Args:
-            teacher_logits: Logits from teacher model
-            student_logits: Logits from student model
-            temperature: Temperature for softening probabilities
-        """
-        # Soften logits using temperature
-        teacher_probs = torch.softmax(teacher_logits / temperature, dim=-1)
-        student_log_probs = torch.log_softmax(student_logits / temperature, dim=-1)
-        
-        # KL divergence loss
-        kl_loss = torch.nn.functional.kl_div(
-            student_log_probs,
-            teacher_probs,
-            reduction='batchmean'
-        )
-        
-        return kl_loss * (temperature ** 2)
     
     def train(self,
               dataset_name: str = "databricks/databricks-dolly-15k",
@@ -219,6 +197,23 @@ class DistillationTrainer:
                 num_samples=num_samples
             )
             
+            # Tokenize dataset
+            def tokenize_function(examples):
+                return student_tokenizer(
+                    examples["text"],
+                    padding="max_length",
+                    truncation=True,
+                    max_length=512
+                )
+            
+            print("\n🔄 Tokenizing dataset...")
+            tokenized_dataset = train_dataset.map(
+                tokenize_function,
+                batched=True,
+                remove_columns=["text"]
+            )
+            print("✅ Dataset tokenized")
+            
             # Setup training arguments
             training_args = TrainingArguments(
                 output_dir=str(self.output_dir),
@@ -234,11 +229,12 @@ class DistillationTrainer:
                 fp16=torch.cuda.is_available(),
                 optim="paged_adamw_8bit",
                 report_to="none",
-                ddp_find_unused_parameters=False
+                ddp_find_unused_parameters=False,
+                remove_unused_columns=False
             )
             
-            # Create data collator
-            data_collator = TextDataCollatorForLanguageModeling(
+            # Create data collator (Fixed for transformers 4.40+)
+            data_collator = DataCollatorForLanguageModeling(
                 tokenizer=student_tokenizer,
                 mlm=False
             )
@@ -247,7 +243,7 @@ class DistillationTrainer:
             trainer = Trainer(
                 model=student_model,
                 args=training_args,
-                train_dataset=train_dataset,
+                train_dataset=tokenized_dataset,
                 data_collator=data_collator,
             )
             
@@ -268,7 +264,8 @@ class DistillationTrainer:
                 'num_epochs': num_epochs,
                 'batch_size': batch_size,
                 'learning_rate': learning_rate,
-                'training_time_seconds': timer.elapsed
+                'training_time_seconds': timer.elapsed,
+                'num_samples': num_samples
             }
             
             metadata_path = self.output_dir / 'distillation_metadata.json'
@@ -277,6 +274,7 @@ class DistillationTrainer:
             
             print("\n✅ Training completed successfully!")
             print(f"Model saved to: {self.output_dir}")
+            print(f"Training time: {timer.elapsed:.2f}s")
             logger.info(f"Training completed in {timer.elapsed:.2f}s")
 
 def main():
